@@ -68,13 +68,16 @@ python src/agents/electricity_agent.py
 ### Direct Tool Usage
 
 ```python
-from src.tools.entsoe_tool import get_electricity_load, get_day_ahead_prices
+from src.tools.entsoe_tool import get_electricity_load, get_day_ahead_prices, get_generation_forecast_day_ahead
 
 # Get load data for Germany (last 24 hours)
 load_data = get_electricity_load('DE', hours_back=24)
 
 # Get day-ahead prices for France
 price_data = get_day_ahead_prices('FR', days_back=1)
+
+# Get generation forecast for Germany (today's forecast)
+forecast_data = get_generation_forecast_day_ahead('DE', days_ahead=1)
 ```
 
 ## Available Tools
@@ -90,6 +93,7 @@ price_data = get_day_ahead_prices('FR', days_back=1)
 ### ENTSOE Data Tools
 - `get_electricity_load()` - Electricity consumption data
 - `get_electricity_generation()` - Generation data by type
+- `get_generation_forecast_day_ahead()` - Day-ahead generation forecasts
 - `get_day_ahead_prices()` - Day-ahead market prices
 - `get_cross_border_flows()` - Physical flows between countries
 - `get_renewable_forecast()` - Wind and solar forecasts
@@ -101,6 +105,8 @@ price_data = get_day_ahead_prices('FR', days_back=1)
 - "What's the current electricity load in Germany?"
 - "Compare electricity prices between Nordic countries"
 - "Show me the renewable energy forecast for Spain"
+- "Get the generation forecast day ahead for Germany"
+- "What's the day-ahead generation forecast for Italy?"
 - "Analyze cross-border flows between Germany and France"
 - "Generate a chart showing Italian electricity prices"
 - "What are the key insights for European electricity markets today?"

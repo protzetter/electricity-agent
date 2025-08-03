@@ -64,6 +64,7 @@ def main():
             
             print("\n🤖 Agent: ", end="", flush=True)
             response = ask_electricity_agent(query)
+            # Response is now guaranteed to be a string
             print(response)
             
         except KeyboardInterrupt:

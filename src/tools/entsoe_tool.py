@@ -1,5 +1,4 @@
 """
-ENTSOE API Tool for Strands Agents - CORRECTED VERSION
 
 This tool provides access to the ENTSOE (European Network of Transmission System Operators 
 for Electricity) Transparency Platform API, with corrected API calls based on official documentation.
@@ -27,28 +26,42 @@ load_dotenv()  # Load from current directory
 load_dotenv(dotenv_path='.env')  # Load from .env in current dir
 load_dotenv(dotenv_path='config/.env')  # Load from config/.env
 
+# First, configure the root logger (this sets up the default handler)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
 logger = logging.getLogger(__name__)
+# Set the level to INFO (or DEBUG to see even more)
+logger.setLevel(logging.INFO)
 
 # CORRECTED Area codes for European countries (FIXED CRITICAL BUGS)
-ENTSOE_AREA_CODES = {
-    'DE': '10Y1001A1001A83F',  # Germany
-    'FR': '10Y1001A1001A92E',  # France  
-    'IT': '10Y1001A1001A788',  # Italy
-    'ES': '10Y1001A1001A85H',  # Spain
-    'NL': '10Y1001A1001A92K',  # Netherlands
-    'BE': '10Y1001A1001A82H',  # Belgium
-    'AT': '10Y1001A1001A92W',  # Austria
-    'CH': '10Y1001A1001A92O',  # Switzerland
-    'PL': '10Y1001A1001A92F',  # Poland
-    'CZ': '10YCZ-CEPS-----N',  # Czech Republic - FIXED! (was using France's code)
-    'DK': '10Y1001A1001A65H',  # Denmark
-    'SE': '10Y1001A1001A44P',  # Sweden
-    'NO': '10Y1001A1001A48H',  # Norway
-    'FI': '10Y1001A1001A39I',  # Finland
-    'GB': '10YGB----------A',  # Great Britain - FIXED! (was using France's code)
-    'IE': '10Y1001A1001A59C',  # Ireland
-    'PT': '10Y1001A1001A85H',  # Portugal - FIXED! (was using Germany's code)
-}
+def _get_area_code(country_code: str) -> str:
+    """Internal function to get ENTSOE area code from country code."""
+    area_codes = {
+        'DE': '10Y1001A1001A82H', 'FR': '10YFR-RTE------C', 'IT': '10YIT-GRTN-----B',
+        'ES': '10YES-REE------0', 'NL': '10YNL----------L', 'BE': '10YBE----------2',
+        'AT': '10YAT-APG------L', 'CH': '10YCH-SWISSGRIDZ', 'PL': '10YPL-AREA-----S',
+        'CZ': '10YCZ-CEPS-----N', 'DK': '10Y1001A1001A65H', 'SE': '10Y1001A1001A44P',
+        'NO': '10Y1001A1001A48H', 'FI': '10Y1001A1001A39I', 'GB': '10YGB----------A',
+        'IE': '10Y1001A1001A59C', 'PT': '10YPT-REN------W'
+    }
+    return area_codes.get(country_code.upper())
+
+def _get_data_delay(country_code: str) -> int:
+    """Internal function to get data delay for country."""
+    delays = {
+        'DE': 48, 'FR': 36, 'IT': 36, 'ES': 36, 'NL': 36, 'BE': 36,
+        'AT': 48, 'CH': 36, 'PL': 36, 'CZ': 24, 'DK': 36, 'SE': 36,
+        'NO': 36, 'FI': 36, 'GB': 36, 'IE': 36, 'PT': 36
+    }
+    return delays.get(country_code.upper(), 36)
+
+def _get_supported_countries() -> List[str]:
+    """Internal function to get list of supported countries."""
+    return ['DE', 'FR', 'IT', 'ES', 'NL', 'BE', 'AT', 'CH', 'PL', 'CZ', 'DK', 'SE', 'NO', 'FI', 'GB', 'IE', 'PT']
+
 
 # CORRECTED Document types based on official ENTSOE documentation
 ENTSOE_DOCUMENT_TYPES = {
@@ -60,6 +73,8 @@ ENTSOE_DOCUMENT_TYPES = {
     'generation_forecast': 'A71',     # Generation forecast
     'generation_actual': 'A75',       # Actual generation per production type
     'generation_aggregated': 'A75',   # Aggregated generation per type
+    'actual_generation': 'A73',       # Actual generation (CORRECTED)
+    'actual_generation_per_unit': 'A74', # Actual generation per generation unit
     
     # Prices
     'day_ahead_prices': 'A44',        # Day-ahead prices
@@ -112,76 +127,6 @@ def _get_api_token() -> Optional[str]:
         logger.debug(f"  - Config file exists: {os.path.exists(config_path)}")
     
     return token
-
-def _get_entsoe_time_range(hours_back: int = 24, data_delay_hours: int = 2) -> tuple:
-    """
-    Get proper time range for ENTSOE API calls with timezone handling.
-    
-    ENTSOE uses Central European Time (CET/CEST) and has data publication delays.
-    
-    Args:
-        hours_back: Number of hours back to fetch data
-        data_delay_hours: Hours to subtract to account for publication delay
-        
-    Returns:
-        tuple: (start_time, end_time) as datetime objects in CET
-    """
-    try:
-        # Use Central European Time (handles CET/CEST automatically)
-        cet = pytz.timezone('Europe/Berlin')
-        now_cet = datetime.now(cet)
-        
-        # Account for data publication delay
-        end_time = now_cet - timedelta(hours=data_delay_hours)
-        start_time = end_time - timedelta(hours=hours_back)
-        
-        # Round to nearest 15-minute interval (ENTSOE data intervals)
-        start_time = start_time.replace(minute=(start_time.minute // 15) * 15, second=0, microsecond=0)
-        end_time = end_time.replace(minute=(end_time.minute // 15) * 15, second=0, microsecond=0)
-        
-        return start_time, end_time
-        
-    except Exception as e:
-        logger.warning(f"Error in timezone handling, falling back to UTC: {e}")
-        # Fallback to UTC if timezone handling fails
-        now_utc = datetime.utcnow()
-        end_time = now_utc - timedelta(hours=data_delay_hours)
-        start_time = end_time - timedelta(hours=hours_back)
-        return start_time, end_time
-
-def _get_day_ahead_price_range(days_back: int = 1) -> tuple:
-    """
-    Get proper time range for day-ahead prices.
-    Day-ahead prices are published around 12:30 CET for the next day.
-    
-    Args:
-        days_back: Number of days back to fetch prices
-        
-    Returns:
-        tuple: (start_time, end_time) for complete day(s)
-    """
-    try:
-        cet = pytz.timezone('Europe/Berlin')
-        now_cet = datetime.now(cet)
-        
-        # Get the date for which prices should be available
-        target_date = now_cet.date() - timedelta(days=days_back)
-        
-        # Start at midnight of target date
-        start_time = cet.localize(datetime.combine(target_date, datetime.min.time()))
-        # End at midnight of next day
-        end_time = start_time + timedelta(days=1)
-        
-        return start_time, end_time
-        
-    except Exception as e:
-        logger.warning(f"Error in day-ahead price time handling: {e}")
-        # Fallback
-        now = datetime.utcnow()
-        start_time = now - timedelta(days=days_back)
-        end_time = start_time + timedelta(days=1)
-        return start_time, end_time
-
 def _make_entsoe_request(params: Dict[str, Any]) -> Dict[str, Any]:
     """Make a request to the ENTSOE API with improved error handling."""
     api_token = _get_api_token()
@@ -257,6 +202,25 @@ def _parse_entsoe_xml(xml_content: str) -> Dict[str, Any]:
     """Parse ENTSOE XML response into structured data with improved parsing."""
     try:
         root = ET.fromstring(xml_content)
+        
+        # Check if this is an Acknowledgement_MarketDocument (error response)
+        if 'Acknowledgement_MarketDocument' in root.tag:
+            # Extract error information
+            reason_elem = root.find('.//{*}Reason')
+            if reason_elem is not None:
+                code_elem = reason_elem.find('.//{*}code')
+                text_elem = reason_elem.find('.//{*}text')
+                
+                error_code = code_elem.text if code_elem is not None else 'Unknown'
+                error_text = text_elem.text if text_elem is not None else 'No error message'
+                
+                return {
+                    'error': f'ENTSOE API Error {error_code}: {error_text}',
+                    'error_code': error_code,
+                    'data_points': [],
+                    'total_points': 0,
+                    'status': 'error'
+                }
         
         data_points = []
         
@@ -419,114 +383,279 @@ def _parse_entsoe_xml(xml_content: str) -> Dict[str, Any]:
         }
 
 @tool
-def get_electricity_load(country_code: str, hours_back: int = 24) -> Dict[str, Any]:
+def get_electricity_load(country_code: str, hours_back: int = 6) -> Dict[str, Any]:
     """
     Get electricity load (consumption) data for a European country.
-    CORRECTED: Uses proper ENTSOE API parameters with timezone handling and data delays.
+    FIXED: Uses proper country-specific data delays and improved error handling.
     
     Args:
         country_code: Two-letter country code (e.g., 'DE' for Germany, 'FR' for France)
-        hours_back: Number of hours back from now to fetch data (default: 24)
+        hours_back: Number of hours of data to fetch (default: 24)
         
     Returns:
         dict: Electricity load data with timestamps and values in MW
     """
     try:
-        if country_code.upper() not in ENTSOE_AREA_CODES:
+        # Validate country code
+        area_code = _get_area_code(country_code)
+        if not area_code:
             return {
                 'error': f'Unsupported country code: {country_code}',
-                'supported_countries': list(ENTSOE_AREA_CODES.keys()),
+                'supported_countries': _get_supported_countries(),
                 'status': 'error'
             }
         
-        area_code = ENTSOE_AREA_CODES[country_code.upper()]
+
         
-        # Use improved time handling with data delay
-        start_time, end_time = _get_entsoe_time_range(hours_back, data_delay_hours=2)
+        # Get country-specific data delay
+        data_delay = 0 #_get_data_delay(country_code)  # Default 36 hours
         
-        # CORRECTED: Use proper parameters for actual total load
+        # Calculate time range with proper delay
+        cet = pytz.timezone('Europe/Berlin')
+        now_cet = datetime.now(cet)
+        
+        # Apply country-specific data delay
+        end_time = now_cet - timedelta(hours=data_delay)
+        start_time = end_time - timedelta(hours=hours_back)
+        
+        # Round to start of hour for cleaner data
+        start_time = start_time.replace(minute=0, second=0, microsecond=0)
+        end_time = end_time.replace(minute=0, second=0, microsecond=0)
+        
+        # Build request parameters
         params = {
             'documentType': ENTSOE_DOCUMENT_TYPES['load_actual'],  # A65
-            'processType': ENTSOE_PROCESS_TYPES['realtime'],       # A16 for realtime
-            'outBiddingZone_Domain': area_code,                    # CORRECT parameter name
-            'periodStart': start_time.strftime('%Y%m%d%H%M'),      # CORRECTED: timezone-aware time
-            'periodEnd': end_time.strftime('%Y%m%d%H%M')           # CORRECTED: timezone-aware time
+            'processType': ENTSOE_PROCESS_TYPES['realtime'],       # A16
+            'outBiddingZone_Domain': area_code,
+            'periodStart': start_time.strftime('%Y%m%d%H%M'),
+            'periodEnd': end_time.strftime('%Y%m%d%H%M')
         }
+        
+        logger.info(f"Fetching load data for {country_code} (delay: {data_delay}h) from {start_time.strftime('%Y-%m-%d %H:%M')} to {end_time.strftime('%Y-%m-%d %H:%M')}")
         
         result = _make_entsoe_request(params)
         
         if result.get('status') == 'success':
             result.update({
-                'country': country_code.upper(),
+                'country_code': country_code.upper(),
+                'area_code': area_code,
                 'data_type': 'electricity_load',
-                'period_start': start_time.isoformat(),
-                'period_end': end_time.isoformat(),
-                'timezone_info': 'Times adjusted for CET/CEST and 2-hour data delay'
+                'time_range': {
+                    'start': start_time.strftime('%Y-%m-%d %H:%M'),
+                    'end': end_time.strftime('%Y-%m-%d %H:%M'),
+                    'hours_requested': hours_back,
+                    'data_delay_hours': data_delay
+                },
+                'document_type': 'A65',
+                'process_type': 'A16',
+                'note': f'Data delayed by {data_delay} hours due to publication schedule'
             })
-        
+        logger.debug(f"Load data for {country_code} results{result}")
         return result
         
     except Exception as e:
         logger.error(f"Error fetching electricity load for {country_code}: {e}")
         return {
-            'error': str(e),
-            'country': country_code,
+            'error': f'Failed to retrieve electricity load: {str(e)}',
+            'country_code': country_code.upper(),
             'status': 'error'
         }
 
 @tool
-def get_electricity_generation(country_code: str, hours_back: int = 24) -> Dict[str, Any]:
+def get_electricity_generation(country_code: str, hours_back: int = 6) -> Dict[str, Any]:
     """
     Get electricity generation data for a European country.
-    CORRECTED: Uses proper ENTSOE API parameters with timezone handling and data delays.
+    FIXED: Uses proper country-specific data delays and improved error handling.
     
     Args:
         country_code: Two-letter country code (e.g., 'DE' for Germany, 'FR' for France)
-        hours_back: Number of hours back from now to fetch data (default: 24)
+        hours_back: Number of hours of data to fetch (default: 24)
         
     Returns:
         dict: Electricity generation data with timestamps and values in MW
     """
     try:
-        if country_code.upper() not in ENTSOE_AREA_CODES:
+        # Validate country code
+        area_code = _get_area_code(country_code)
+        if not area_code:
             return {
                 'error': f'Unsupported country code: {country_code}',
-                'supported_countries': list(ENTSOE_AREA_CODES.keys()),
+                'supported_countries': _get_supported_countries(),
                 'status': 'error'
             }
         
-        area_code = ENTSOE_AREA_CODES[country_code.upper()]
+
         
-        # Use improved time handling with data delay
-        start_time, end_time = _get_entsoe_time_range(hours_back, data_delay_hours=2)
+        # Get country-specific data delay
+        data_delay = 0 # _get_data_delay(country_code)  # Default 36 hours
         
-        # CORRECTED: Use proper parameters for actual generation per production type
+        # Calculate time range with proper delay
+        cet = pytz.timezone('Europe/Berlin')
+        now_cet = datetime.now(cet)
+        
+        # Apply country-specific data delay
+        end_time = now_cet - timedelta(hours=data_delay)
+        start_time = end_time - timedelta(hours=hours_back)
+        
+        # Round to start of hour for cleaner data
+        start_time = start_time.replace(minute=0, second=0, microsecond=0)
+        end_time = end_time.replace(minute=0, second=0, microsecond=0)
+        
+        # Build request parameters
         params = {
             'documentType': ENTSOE_DOCUMENT_TYPES['generation_actual'],  # A75
-            'processType': ENTSOE_PROCESS_TYPES['realtime'],             # A16 for realtime
-            'in_Domain': area_code,                                      # CORRECT parameter name
-            'periodStart': start_time.strftime('%Y%m%d%H%M'),            # CORRECTED: timezone-aware time
-            'periodEnd': end_time.strftime('%Y%m%d%H%M')                 # CORRECTED: timezone-aware time
+            'processType': ENTSOE_PROCESS_TYPES['realtime'],             # A16
+            'in_Domain': area_code,
+            'periodStart': start_time.strftime('%Y%m%d%H%M'),
+            'periodEnd': end_time.strftime('%Y%m%d%H%M')
         }
+        
+        logger.info(f"Fetching generation data for {country_code} (delay: {data_delay}h) from {start_time.strftime('%Y-%m-%d %H:%M')} to {end_time.strftime('%Y-%m-%d %H:%M')}")
         
         result = _make_entsoe_request(params)
         
         if result.get('status') == 'success':
             result.update({
-                'country': country_code.upper(),
+                'country_code': country_code.upper(),
+                'area_code': area_code,
                 'data_type': 'electricity_generation',
-                'period_start': start_time.isoformat(),
-                'period_end': end_time.isoformat(),
-                'timezone_info': 'Times adjusted for CET/CEST and 2-hour data delay'
+                'time_range': {
+                    'start': start_time.strftime('%Y-%m-%d %H:%M'),
+                    'end': end_time.strftime('%Y-%m-%d %H:%M'),
+                    'hours_requested': hours_back,
+                    'data_delay_hours': data_delay
+                },
+                'document_type': 'A75',
+                'process_type': 'A16',
+                'note': f'Data delayed by {data_delay} hours due to publication schedule'
             })
-        
+        logger.debug(f"Generation  data for {country_code} results{result}")
         return result
         
     except Exception as e:
         logger.error(f"Error fetching electricity generation for {country_code}: {e}")
         return {
+            'error': f'Failed to retrieve electricity generation: {str(e)}',
+            'country_code': country_code.upper(),
+            'status': 'error'
+        }
+
+@tool
+def get_generation_forecast_day_ahead(country_code: str, days_ahead: int = 1) -> Dict[str, Any]:
+    """
+    Get day-ahead generation forecast for a European country.
+    
+    This function retrieves the day-ahead generation forecast data from the ENTSOE 
+    Transparency Platform. The forecast shows expected electricity generation by 
+    production type for today (and optionally additional days).
+    
+    Note: "Day-ahead" refers to when the forecast was made (yesterday for today's data),
+    not the target date. This function retrieves today's generation forecast.
+    
+    Args:
+        country_code: Two-letter country code (e.g., 'DE' for Germany, 'FR' for France)
+        days_ahead: Number of days to fetch forecast data (default: 1, max: 7)
+                   1 = today only, 2 = today + tomorrow, etc.
+        
+    Returns:
+        dict: Generation forecast data with the following structure:
+            - status: 'success' or 'error'
+            - country: Country code
+            - data_type: 'generation_forecast_day_ahead'
+            - data_points: List of forecast data points with timestamps and values in MW
+            - total_points: Number of data points retrieved
+            - period_start: Start time of the forecast period (ISO format)
+            - period_end: End time of the forecast period (ISO format)
+            - timezone_info: Information about timezone handling
+            - forecast_horizon: Number of days of forecast data
+            
+    Example:
+        >>> result = get_generation_forecast_day_ahead('DE', 1)
+        >>> print(f"Retrieved {result['total_points']} forecast points for Germany")
+        >>> for point in result['data_points'][:3]:  # Show first 3 points
+        ...     print(f"{point['timestamp']}: {point['value']} MW ({point.get('production_type', 'Total')})")
+    """
+    try:
+        # Validate country code
+        area_code = _get_area_code(country_code)
+        if not area_code:
+            return {
+                'error': f'Unsupported country code: {country_code}',
+                'supported_countries': _get_supported_countries(),
+                'status': 'error'
+            }
+        
+        # Validate days_ahead parameter
+        if not isinstance(days_ahead, int) or days_ahead < 1 or days_ahead > 7:
+            return {
+                'error': 'days_ahead must be an integer between 1 and 7',
+                'status': 'error'
+            }
+        
+
+        
+        # Calculate time range for day-ahead forecast
+        # Day-ahead forecasts are typically available for the current day, not future days
+        # The "day-ahead" refers to when the forecast was made (the day before), not the target day
+        cet_tz = pytz.timezone('Europe/Berlin')
+        now_cet = datetime.now(cet_tz)
+        
+        # For day-ahead forecasts, we get today's data (forecast made yesterday for today)
+        # Start from beginning of today in CET
+        today = now_cet.date()
+        start_time = cet_tz.localize(datetime.combine(today, datetime.min.time()))
+        
+        # If days_ahead > 1, we can try to get multiple days, but data availability varies
+        end_time = start_time + timedelta(days=days_ahead)
+        
+        # ENTSOE API parameters for generation forecast day-ahead
+        # Based on ENTSOE documentation: https://documenter.getpostman.com/view/7009892/2s93JtP3F6#e2e1a56e-2ee1-4b83-b1db-8a3d21cc0ac0
+        params = {
+            'documentType': ENTSOE_DOCUMENT_TYPES['generation_forecast'],  # A71 - Generation forecast
+            'processType': ENTSOE_PROCESS_TYPES['day_ahead'],              # A01 - Day ahead process
+            'in_Domain': area_code,                                        # Bidding zone/control area
+            'periodStart': start_time.strftime('%Y%m%d%H%M'),              # Start time in ENTSOE format yyyyMMddHHmm
+            'periodEnd': end_time.strftime('%Y%m%d%H%M')                   # End time in ENTSOE format yyyyMMddHHmm
+        }
+        
+        # Make the API request
+        result = _make_entsoe_request(params)
+        
+        # Enhance the result with additional metadata
+        if result.get('status') == 'success':
+            result.update({
+                'country': country_code.upper(),
+                'data_type': 'generation_forecast_day_ahead',
+                'period_start': start_time.isoformat(),
+                'period_end': end_time.isoformat(),
+                'timezone_info': 'Times in CET/CEST timezone',
+                'forecast_horizon': days_ahead,
+                'forecast_type': 'Day-ahead generation forecast by production type',
+                'data_source': 'ENTSOE Transparency Platform',
+                'api_parameters': {
+                    'documentType': 'A71 (Generation forecast)',
+                    'processType': 'A01 (Day ahead)',
+                    'domain': area_code
+                }
+            })
+            
+            # Add unit information to data points if available
+            for point in result.get('data_points', []):
+                if 'unit' not in point:
+                    point['unit'] = 'MW'
+                # Add forecast context
+                point['forecast_type'] = 'day_ahead'
+        
+        logger.debug(f"Generation forecast day ahead  data for {country_code} results{result}")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error fetching generation forecast day-ahead for {country_code}: {e}")
+        return {
             'error': str(e),
-            'country': country_code,
+            'country': country_code.upper(),
+            'data_type': 'generation_forecast_day_ahead',
             'status': 'error'
         }
 
@@ -534,7 +663,12 @@ def get_electricity_generation(country_code: str, hours_back: int = 24) -> Dict[
 def get_day_ahead_prices(country_code: str, days_back: int = 1) -> Dict[str, Any]:
     """
     Get day-ahead electricity prices for a European country.
-    CORRECTED: Uses proper ENTSOE API parameters with timezone handling for day-ahead prices.
+    FIXED: Uses country-specific parameter structures and proper delays.
+    
+    Day-ahead prices have different API parameter requirements by country:
+    - Some countries use in_Domain + out_Domain
+    - Others use biddingZone_Domain
+    - Publication times and delays vary by market coupling participation
     
     Args:
         country_code: Two-letter country code (e.g., 'DE' for Germany, 'FR' for France)
@@ -544,42 +678,126 @@ def get_day_ahead_prices(country_code: str, days_back: int = 1) -> Dict[str, Any
         dict: Day-ahead electricity prices with timestamps and values in EUR/MWh
     """
     try:
-        if country_code.upper() not in ENTSOE_AREA_CODES:
+        # Validate country code
+        area_code = _get_area_code(country_code)
+        if not area_code:
             return {
                 'error': f'Unsupported country code: {country_code}',
-                'supported_countries': list(ENTSOE_AREA_CODES.keys()),
+                'supported_countries': _get_supported_countries(),
                 'status': 'error'
             }
         
-        area_code = ENTSOE_AREA_CODES[country_code.upper()]
+
         
-        # Use improved time handling for day-ahead prices
-        start_time, end_time = _get_day_ahead_price_range(days_back)
-        
-        # CORRECTED: Use proper parameters for day-ahead prices
-        params = {
-            'documentType': ENTSOE_DOCUMENT_TYPES['day_ahead_prices'],  # A44
-            'processType': ENTSOE_PROCESS_TYPES['day_ahead'],           # A01 for day-ahead (CORRECTED)
-            'in_Domain': area_code,                                     # CORRECT parameter name
-            'out_Domain': area_code,                                    # CORRECT parameter name
-            'periodStart': start_time.strftime('%Y%m%d%H%M'),           # CORRECTED: timezone-aware time
-            'periodEnd': end_time.strftime('%Y%m%d%H%M')                # CORRECTED: timezone-aware time
+        # Day-ahead prices have different delays and parameter structures by country
+        price_config = {
+            'DE': {'delay': 24, 'param_type': 'biddingZone'},  # Germany uses biddingZone_Domain
+            'FR': {'delay': 24, 'param_type': 'biddingZone'},  # France uses biddingZone_Domain
+            'IT': {'delay': 12, 'param_type': 'in_out'},       # Italy uses in_Domain + out_Domain
+            'ES': {'delay': 24, 'param_type': 'biddingZone'},  # Spain uses biddingZone_Domain
+            'NL': {'delay': 24, 'param_type': 'biddingZone'},  # Netherlands uses biddingZone_Domain
+            'BE': {'delay': 24, 'param_type': 'biddingZone'},  # Belgium uses biddingZone_Domain
+            'AT': {'delay': 24, 'param_type': 'biddingZone'},  # Austria uses biddingZone_Domain
+            'CH': {'delay': 24, 'param_type': 'biddingZone'},  # Switzerland uses biddingZone_Domain
+            'PL': {'delay': 24, 'param_type': 'biddingZone'},  # Poland uses biddingZone_Domain
+            'CZ': {'delay': 24, 'param_type': 'biddingZone'},  # Czech Republic uses biddingZone_Domain
+            'DK': {'delay': 24, 'param_type': 'biddingZone'},  # Denmark uses biddingZone_Domain
+            'SE': {'delay': 24, 'param_type': 'biddingZone'},  # Sweden uses biddingZone_Domain
+            'NO': {'delay': 24, 'param_type': 'biddingZone'},  # Norway uses biddingZone_Domain
+            'FI': {'delay': 24, 'param_type': 'biddingZone'},  # Finland uses biddingZone_Domain
+            'GB': {'delay': 24, 'param_type': 'biddingZone'},  # Great Britain uses biddingZone_Domain
+            'IE': {'delay': 24, 'param_type': 'biddingZone'},  # Ireland uses biddingZone_Domain
+            'PT': {'delay': 24, 'param_type': 'biddingZone'}   # Portugal uses biddingZone_Domain
         }
+        
+        config = price_config.get(country_code.upper(), {'delay': 24, 'param_type': 'biddingZone'})
+        data_delay = config['delay']
+        param_type = config['param_type']
+        
+        # Calculate time range for day-ahead prices
+        cet = pytz.timezone('Europe/Berlin')
+        now_cet = datetime.now(cet)
+        
+        # Apply delay and calculate target date
+        reference_time = now_cet - timedelta(hours=data_delay)
+        target_date = reference_time.date() - timedelta(days=days_back - 1)
+        
+        # Day-ahead prices are for complete days (00:00 to 24:00)
+        start_time = cet.localize(datetime.combine(target_date, datetime.min.time()))
+        end_time = start_time + timedelta(days=1)
+        
+        logger.info(f"Fetching day-ahead prices for {country_code} (delay: {data_delay}h, type: {param_type}) for date: {target_date.strftime('%Y-%m-%d')}")
+        
+        # Build request parameters based on country-specific requirements
+        if param_type == 'in_out':
+            # Countries like Italy use in_Domain + out_Domain
+            params = {
+                'documentType': 'A44',  # Day-ahead prices
+                'in_Domain': area_code,
+                'out_Domain': area_code,
+                'periodStart': start_time.strftime('%Y%m%d%H%M'),
+                'periodEnd': end_time.strftime('%Y%m%d%H%M')
+            }
+        else:
+            # Most countries use biddingZone_Domain
+            params = {
+                'documentType': 'A44',  # Day-ahead prices
+                'biddingZone_Domain': area_code,
+                'periodStart': start_time.strftime('%Y%m%d%H%M'),
+                'periodEnd': end_time.strftime('%Y%m%d%H%M')
+            }
         
         result = _make_entsoe_request(params)
         
+        # If first method fails, try the alternative parameter structure
+        if result.get('status') == 'error' and 'No matching data found' in result.get('error', ''):
+            logger.info(f"First method failed for {country_code}, trying alternative parameter structure")
+            
+            if param_type == 'in_out':
+                # Try biddingZone_Domain instead
+                params_alt = {
+                    'documentType': 'A44',
+                    'biddingZone_Domain': area_code,
+                    'periodStart': start_time.strftime('%Y%m%d%H%M'),
+                    'periodEnd': end_time.strftime('%Y%m%d%H%M')
+                }
+            else:
+                # Try in_Domain + out_Domain instead
+                params_alt = {
+                    'documentType': 'A44',
+                    'in_Domain': area_code,
+                    'out_Domain': area_code,
+                    'periodStart': start_time.strftime('%Y%m%d%H%M'),
+                    'periodEnd': end_time.strftime('%Y%m%d%H%M')
+                }
+            
+            result = _make_entsoe_request(params_alt)
+            param_type = 'alternative'
+        
         if result.get('status') == 'success':
-            # Update unit for prices
+            # Ensure price units are correct
             for point in result.get('data_points', []):
-                if 'EUR' not in point.get('unit', ''):
+                if 'unit' in point and 'EUR' not in point['unit']:
+                    point['unit'] = 'EUR/MWh'
+                elif 'unit' not in point:
                     point['unit'] = 'EUR/MWh'
             
             result.update({
-                'country': country_code.upper(),
+                'country_code': country_code.upper(),
+                'area_code': area_code,
                 'data_type': 'day_ahead_prices',
-                'period_start': start_time.isoformat(),
-                'period_end': end_time.isoformat(),
-                'timezone_info': 'Times in CET/CEST, prices for complete day(s)'
+                'time_range': {
+                    'start': start_time.strftime('%Y-%m-%d %H:%M'),
+                    'end': end_time.strftime('%Y-%m-%d %H:%M'),
+                    'target_date': target_date.strftime('%Y-%m-%d'),
+                    'days_requested': days_back,
+                    'data_delay_hours': data_delay
+                },
+                'document_type': 'A44',
+                'parameter_type': param_type,
+                'currency': 'EUR',
+                'unit': 'EUR/MWh',
+                'note': f'Day-ahead prices for {target_date.strftime("%Y-%m-%d")}. Data delayed by {data_delay} hours. Using {param_type} parameter structure.'
             })
         
         return result
@@ -587,8 +805,8 @@ def get_day_ahead_prices(country_code: str, days_back: int = 1) -> Dict[str, Any
     except Exception as e:
         logger.error(f"Error fetching day-ahead prices for {country_code}: {e}")
         return {
-            'error': str(e),
-            'country': country_code,
+            'error': f'Failed to retrieve day-ahead prices: {str(e)}',
+            'country_code': country_code.upper(),
             'status': 'error'
         }
 
@@ -607,30 +825,49 @@ def get_cross_border_flows(from_country: str, to_country: str, hours_back: int =
         dict: Cross-border flow data with timestamps and values in MW
     """
     try:
-        if (from_country.upper() not in ENTSOE_AREA_CODES or 
-            to_country.upper() not in ENTSOE_AREA_CODES):
+        from_area = _get_area_code(from_country)
+        to_area = _get_area_code(to_country)
+        if not from_area or not to_area:
             return {
                 'error': f'Unsupported country code(s): {from_country}, {to_country}',
-                'supported_countries': list(ENTSOE_AREA_CODES.keys()),
+                'supported_countries': _get_supported_countries(),
                 'status': 'error'
             }
         
-        from_area = ENTSOE_AREA_CODES[from_country.upper()]
-        to_area = ENTSOE_AREA_CODES[to_country.upper()]
+        from_area = _get_area_code(from_country)
+        to_area = _get_area_code(to_country)
         end_time = datetime.now()
         start_time = end_time - timedelta(hours=hours_back)
         
-        # CORRECTED: Use proper parameters for cross-border physical flows
+        # CORRECTED: Based on ENTSOE API documentation for Physical Flows (12.1.G)
+        # Cross-border flows use specific parameter names
         params = {
             'documentType': ENTSOE_DOCUMENT_TYPES['cross_border_flows'],  # A11
-            'processType': ENTSOE_PROCESS_TYPES['realtime'],              # A16 for realtime
-            'in_Domain': from_area,                                       # CORRECT parameter name
-            'out_Domain': to_area,                                        # CORRECT parameter name
-            'periodStart': start_time.strftime('%Y%m%d%H%M'),             # CORRECTED: Use actual time
-            'periodEnd': end_time.strftime('%Y%m%d%H%M')                  # CORRECTED: Use actual time
+            'outBiddingZone_Domain': from_area,                           # Exporting area
+            'inBiddingZone_Domain': to_area,                              # Importing area
+            'periodStart': start_time.strftime('%Y%m%d%H%M'),
+            'periodEnd': end_time.strftime('%Y%m%d%H%M')
         }
         
         result = _make_entsoe_request(params)
+        
+        # If the above fails, try alternative parameter names
+        if result.get('status') == 'error' and result.get('status_code') == 400:
+            logger.info("Trying alternative parameter names for cross-border flows")
+            params_alt = {
+                'documentType': ENTSOE_DOCUMENT_TYPES['cross_border_flows'],  # A11
+                'in_Domain': from_area,                                       # Source area
+                'out_Domain': to_area,                                        # Destination area
+                'periodStart': start_time.strftime('%Y%m%d%H%M'),
+                'periodEnd': end_time.strftime('%Y%m%d%H%M')
+            }
+            result = _make_entsoe_request(params_alt)
+            
+            # If still failing, try with processType
+            if result.get('status') == 'error' and result.get('status_code') == 400:
+                logger.info("Trying with processType parameter")
+                params_alt['processType'] = ENTSOE_PROCESS_TYPES['realtime']  # A16
+                result = _make_entsoe_request(params_alt)
         
         if result.get('status') == 'success':
             result.update({
@@ -656,53 +893,155 @@ def get_cross_border_flows(from_country: str, to_country: str, hours_back: int =
 def get_renewable_forecast(country_code: str, hours_ahead: int = 48) -> Dict[str, Any]:
     """
     Get wind and solar generation forecast for a European country.
-    CORRECTED: Uses proper ENTSOE API parameters for wind and solar forecast.
+    FIXED: Uses proper timezone handling, data delays, and forecast availability windows.
+    
+    Renewable forecasts (wind and solar) are typically published with specific schedules:
+    - Day-ahead forecasts: Available after market closure (~12:30 CET)
+    - Intraday updates: Published throughout the day
+    - Forecast horizons: Usually 24-72 hours ahead
     
     Args:
         country_code: Two-letter country code (e.g., 'DE' for Germany, 'FR' for France)
-        hours_ahead: Number of hours ahead to fetch forecast data (default: 48)
+        hours_ahead: Number of hours ahead to fetch forecast data (default: 48, max: 72)
         
     Returns:
         dict: Renewable generation forecast data with timestamps and values in MW
     """
     try:
-        if country_code.upper() not in ENTSOE_AREA_CODES:
+        # Validate country code
+        area_code = _get_area_code(country_code)
+        if not area_code:
             return {
                 'error': f'Unsupported country code: {country_code}',
-                'supported_countries': list(ENTSOE_AREA_CODES.keys()),
+                'supported_countries': _get_supported_countries(),
                 'status': 'error'
             }
         
-        area_code = ENTSOE_AREA_CODES[country_code.upper()]
-        start_time = datetime.now()
-        end_time = start_time + timedelta(hours=hours_ahead)
+
         
-        # CORRECTED: Use proper parameters for wind and solar forecast
-        params = {
-            'documentType': ENTSOE_DOCUMENT_TYPES['wind_solar_forecast'],  # A69
-            'processType': ENTSOE_PROCESS_TYPES['day_ahead'],              # A01 for day-ahead forecast (CORRECTED)
-            'in_Domain': area_code,                                        # CORRECT parameter name
-            'periodStart': start_time.strftime('%Y%m%d%H%M'),              # CORRECTED: Use actual time
-            'periodEnd': end_time.strftime('%Y%m%d%H%M')                   # CORRECTED: Use actual time
+        # Limit forecast horizon to reasonable range
+        hours_ahead = min(hours_ahead, 72)  # Max 72 hours ahead
+        
+        # Renewable forecasts have different availability patterns than historical data
+        # They're typically available after day-ahead market closure
+        forecast_delays = {
+            'DE': 6,   # Germany: 6 hours (forecasts available after market closure)
+            'FR': 6,   # France: 6 hours
+            'IT': 8,   # Italy: 8 hours
+            'ES': 6,   # Spain: 6 hours
+            'NL': 6,   # Netherlands: 6 hours
+            'BE': 6,   # Belgium: 6 hours
+            'AT': 6,   # Austria: 6 hours
+            'CH': 8,   # Switzerland: 8 hours
+            'PL': 8,   # Poland: 8 hours
+            'CZ': 6,   # Czech Republic: 6 hours
+            'DK': 4,   # Denmark: 4 hours (excellent wind forecasting)
+            'SE': 6,   # Sweden: 6 hours
+            'NO': 6,   # Norway: 6 hours
+            'FI': 6,   # Finland: 6 hours
+            'GB': 6,   # Great Britain: 6 hours
+            'IE': 6,   # Ireland: 6 hours
+            'PT': 6    # Portugal: 6 hours
         }
         
-        result = _make_entsoe_request(params)
+        forecast_delay = forecast_delays.get(country_code.upper(), 6)  # Default 6 hours
         
-        if result.get('status') == 'success':
-            result.update({
-                'country': country_code.upper(),
-                'data_type': 'renewable_forecast',
-                'period_start': start_time.isoformat(),
-                'period_end': end_time.isoformat(),
-            })
+        # Calculate time range for renewable forecasts
+        cet = pytz.timezone('Europe/Berlin')
+        now_cet = datetime.now(cet)
         
-        return result
+        # Start from a time when forecasts should be available
+        # (current time minus delay to ensure data availability)
+        start_time = now_cet - timedelta(hours=forecast_delay)
+        end_time = start_time + timedelta(hours=hours_ahead)
+        
+        # Round to start of hour for cleaner data
+        start_time = start_time.replace(minute=0, second=0, microsecond=0)
+        end_time = end_time.replace(minute=0, second=0, microsecond=0)
+        
+        logger.info(f"Fetching renewable forecast for {country_code} (delay: {forecast_delay}h) from {start_time.strftime('%Y-%m-%d %H:%M')} to {end_time.strftime('%Y-%m-%d %H:%M')}")
+        
+        # Try multiple parameter combinations for renewable forecasts
+        # Forecasts work best with biddingZone_Domain parameter
+
+        params= {
+                    'documentType': 'A69',  # Wind and solar forecast
+                    'processType': 'A01',   # Day ahead
+                    'in_Domain': area_code,
+                    'periodStart': start_time.strftime('%Y%m%d%H%M'),
+                    'periodEnd': end_time.strftime('%Y%m%d%H%M'),
+                }
+        
+        last_error = None
+        
+            
+        try:
+            result = _make_entsoe_request(params)
+                
+            if result['status'] == 'success':
+                # Add renewable-specific metadata
+                result.update({
+                    'country_code': country_code.upper(),
+                    'bidding_zone': area_code,
+                    'data_type': 'renewable_forecast',
+                    'time_range': {
+                        'start': start_time.strftime('%Y-%m-%d %H:%M'),
+                        'end': end_time.strftime('%Y-%m-%d %H:%M'),
+                        'hours_ahead': hours_ahead,
+                        'forecast_delay_hours': forecast_delay
+                    },
+                    'document_type': params['documentType'],
+                    'process_type': 'A01',
+                    'forecast_types': ['wind', 'solar'],
+                    'note': f'Renewable energy forecast using bidding zone approach'
+                })
+                
+                logger.info(f"Successfully retrieved {result.get('total_points', 0)} renewable forecast points")
+                return result
+                
+            else:
+                # Log the error but continue trying other methods
+                error_msg = result.get('error', 'Unknown error')
+                logger.info(f"Method  failed: {error_msg}")
+                last_error = error_msg
+                
+        except Exception as e:
+            logger.info(f"Method exception: {str(e)}")
+            last_error = str(e)
+
+        
+        # If we get here, all methods failed
+        return {
+            'error': f'Failed to retrieve renewable forecast: {last_error}. Renewable forecasts may have limited availability or different publication schedules.',
+            'country_code': country_code.upper(),
+            'area_code': area_code,
+            'status': 'error',
+            'time_range': {
+                'start': start_time.strftime('%Y-%m-%d %H:%M'),
+                'end': end_time.strftime('%Y-%m-%d %H:%M'),
+                'hours_ahead': hours_ahead,
+                'forecast_delay_hours': forecast_delay
+            },
+            'note': 'Renewable forecasts (A69/A71) have specific publication schedules and may not be available for all countries.',
+            'suggestions': [
+                'Try a different country (DE, DK, ES are more likely to have renewable forecasts)',
+                'Use shorter forecast horizons (24 hours instead of 48+)',
+                'Try during European business hours when forecasts are typically updated',
+                'Check if the country has significant renewable capacity',
+                'Some countries may only provide aggregated generation forecasts'
+            ],
+            'alternative_functions': [
+                'get_generation_forecast_day_ahead() - for total generation forecasts',
+                'get_electricity_generation() - for actual renewable generation data',
+                'get_day_ahead_prices() - prices often reflect renewable forecast impacts'
+            ]
+        }
         
     except Exception as e:
         logger.error(f"Error fetching renewable forecast for {country_code}: {e}")
         return {
-            'error': str(e),
-            'country': country_code,
+            'error': f'Failed to retrieve renewable forecast: {str(e)}',
+            'country_code': country_code.upper(),
             'status': 'error'
         }
 
@@ -722,14 +1061,15 @@ def get_imbalance_prices(country_code: str, hours_back: int = 24) -> Dict[str, A
         dict: Imbalance price data
     """
     try:
-        if country_code.upper() not in ENTSOE_AREA_CODES:
+        area_code = _get_area_code(country_code)
+        if not area_code:
             return {
                 'error': f'Unsupported country code: {country_code}',
-                'supported_countries': list(ENTSOE_AREA_CODES.keys()),
+                'supported_countries': _get_supported_countries(),
                 'status': 'error'
             }
         
-        area_code = ENTSOE_AREA_CODES[country_code.upper()]
+
         end_time = datetime.now()
         start_time = end_time - timedelta(hours=hours_back)
         
@@ -813,7 +1153,7 @@ def get_entsoe_api_info() -> Dict[str, Any]:
         'registration_url': 'https://transparency.entsoe.eu/',
         'available_data_types': list(ENTSOE_DOCUMENT_TYPES.keys()),
         'process_types': list(ENTSOE_PROCESS_TYPES.keys()),
-        'supported_countries': list(ENTSOE_AREA_CODES.keys()),
+        'supported_countries': _get_supported_countries(),
         'api_token_required': True,
         'environment_variable': 'ENTSOE_API_TOKEN',
         'corrections_applied': [
@@ -843,14 +1183,15 @@ def debug_entsoe_request(country_code: str, data_type: str = 'load') -> Dict[str
         dict: Debug information including request parameters and URLs
     """
     try:
-        if country_code.upper() not in ENTSOE_AREA_CODES:
+        area_code = _get_area_code(country_code)
+        if not area_code:
             return {
                 'error': f'Unsupported country code: {country_code}',
-                'supported_countries': list(ENTSOE_AREA_CODES.keys()),
+                'supported_countries': _get_supported_countries(),
                 'status': 'error'
             }
         
-        area_code = ENTSOE_AREA_CODES[country_code.upper()]
+
         end_time = datetime.now()
         start_time = end_time - timedelta(hours=24)
         
@@ -914,5 +1255,354 @@ def debug_entsoe_request(country_code: str, data_type: str = 'load') -> Dict[str
         logger.error(f"Error debugging ENTSOE request: {e}")
         return {
             'error': str(e),
+            'status': 'error'
+        }
+
+
+# @tool
+# def get_actual_generation_per_unit(country_code: str, date_str: str = None, psr_type: str = None) -> Dict[str, Any]:
+#     """
+#     Get actual electricity generation per generation unit for a European country.
+    
+#     This function retrieves detailed generation data showing actual electricity production
+#     from individual generation units (power plants) rather than aggregated by fuel type.
+#     Uses ENTSOE document type A73 for actual generation.
+    
+#     IMPORTANT LIMITATIONS (from ENTSOE API):
+#     - Maximum time interval: 1 day
+#     - Minimum time interval: 1 Market Time Unit
+#     - Data typically available for historical periods (not real-time)
+#     - Uses A73 (Actual generation) with A16 (Realised) process type
+    
+#     Based on ENTSOE API documentation with correct parameters:
+#     - documentType: A73 (Actual generation)
+#     - processType: A16 (Realised)
+#     - in_Domain: EIC code of Control Area
+    
+#     Args:
+#         country_code: Two-letter country code (e.g., 'BE' for Belgium, 'DE' for Germany)
+#         date_str: Date string in format 'YYYY-MM-DD' (e.g., '2023-08-15'). 
+#                  If None, tries yesterday. Historical dates work better.
+#         psr_type: Optional production source type filter (e.g., 'B14' for Nuclear, 'B16' for Solar)
+#                  Available types: B01=Biomass, B02=Brown coal, B04=Gas, B05=Hard coal, 
+#                  B06=Oil, B09=Geothermal, B10=Hydro Pumped, B11=Hydro Run-of-river,
+#                  B12=Hydro Reservoir, B14=Nuclear, B15=Other renewable, B16=Solar,
+#                  B17=Waste, B18=Wind Offshore, B19=Wind Onshore, B20=Other
+        
+#     Returns:
+#         dict: Generation data with the following structure:
+#             - status: 'success' or 'error'
+#             - data_points: List of generation data points per unit
+#             - total_points: Number of data points retrieved
+#             - country_code: Country code used
+#             - time_range: Start and end times for the data
+#             - units: List of generation units found
+#             - psr_type_filter: Production source type filter applied (if any)
+#             - error: Error message (if status is 'error')
+            
+#     Example:
+#         >>> # Get historical data (works better)
+#         >>> result = get_actual_generation_per_unit('BE', '2023-08-15')
+#         >>> if result['status'] == 'success':
+#         ...     print(f"Found {result['total_points']} data points")
+        
+#         >>> # Get only nuclear generation for a specific date
+#         >>> result = get_actual_generation_per_unit('BE', '2023-08-15', psr_type='B14')
+        
+#         >>> # Try recent data (may not be available)
+#         >>> result = get_actual_generation_per_unit('BE')  # Uses yesterday
+#     """
+#     try:
+#         # Validate country code
+#         area_code = _get_area_code(country_code)
+#         if not area_code:
+#             return {
+#                 'error': f'Unsupported country code: {country_code}. Supported countries: {_get_supported_countries()}',
+#                 'status': 'error'
+#             }
+        
+#         # Calculate time range
+#         cet_tz = pytz.timezone('Europe/Berlin')
+        
+#         if date_str:
+#             # Parse provided date
+#             print(date_str)
+#             try:
+#                 target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+#                 start_time = cet_tz.localize(datetime.combine(target_date, datetime.min.time().replace(hour=22)))
+#                 end_time = start_time + timedelta(hours=6)
+#             except ValueError:
+#                 return {
+#                     'error': f'Invalid date format: {date_str}. Use YYYY-MM-DD format (e.g., 2023-08-15)',
+#                     'status': 'error'
+#                 }
+#         else:
+#             # Use yesterday (most likely to have data)
+#             now_cet = datetime.now(cet_tz)
+#             yesterday = now_cet.date() - timedelta(days=1)
+#             start_time = cet_tz.localize(datetime.combine(yesterday, datetime.min.time().replace(hour=22)))
+#             end_time = start_time + timedelta(hours=6)
+#             print(end_time)
+        
+#         # Build parameters for actual generation (A73)
+#         params = {
+#             'documentType': 'A73',                                                # A73 = Actual generation
+#             'processType': 'A16',                                                 # A16 = Realised
+#             'in_Domain': area_code,                                               # EIC code of Control Area
+#             'periodStart': start_time.strftime('%Y%m%d%H%M'),                     # Pattern yyyyMMddHHmm
+#             'periodEnd': end_time.strftime('%Y%m%d%H%M')                          # Pattern yyyyMMddHHmm
+#         }
+        
+#         # Add optional PsrType filter if specified
+#         if psr_type:
+#             params['PsrType'] = psr_type
+        
+#         logger.info(f"Requesting actual generation for {country_code} from {start_time.strftime('%Y-%m-%d %H:%M')} to {end_time.strftime('%Y-%m-%d %H:%M')}")
+#         if psr_type:
+#             logger.info(f"Filtering by production source type: {psr_type}")
+        
+#         # Make the API request
+#         result = _make_entsoe_request(params)
+        
+#         if result['status'] == 'success':
+#             # Parse the response and extract unit information
+#             parsed_data = result.copy()
+            
+#             # Extract unique generation units from the data
+#             units = set()
+#             production_types = set()
+            
+#             if 'data_points' in parsed_data:
+#                 for point in parsed_data['data_points']:
+#                     # Try different possible field names for unit identification
+#                     unit_name = None
+#                     if 'unit_name' in point:
+#                         unit_name = point['unit_name']
+#                     elif 'resource_name' in point:
+#                         unit_name = point['resource_name']
+#                     elif 'registered_resource' in point.get('metadata', {}):
+#                         unit_name = point['metadata']['registered_resource']
+#                     elif 'mRID' in point:
+#                         unit_name = point['mRID']
+#                     elif 'production_type' in point:
+#                         # Use production type as identifier if no unit name available
+#                         unit_name = f"Unit_{point['production_type']}"
+                    
+#                     if unit_name:
+#                         units.add(unit_name)
+                    
+#                     # Track production types
+#                     if 'production_type' in point:
+#                         production_types.add(point['production_type'])
+            
+#             # Add additional metadata
+#             parsed_data.update({
+#                 'country_code': country_code.upper(),
+#                 'time_range': {
+#                     'start': start_time.strftime('%Y-%m-%d %H:%M'),
+#                     'end': end_time.strftime('%Y-%m-%d %H:%M'),
+#                     'date_requested': date_str or 'yesterday',
+#                     'interval': '1 day (API maximum)'
+#                 },
+#                 'units': list(units),
+#                 'production_types': list(production_types),
+#                 'psr_type_filter': psr_type,
+#                 'data_type': 'actual_generation_per_unit',
+#                 'document_type': 'A73 (Actual generation)',
+#                 'process_type': 'A16 (Realised)',
+#                 'api_endpoint': 'ENTSOE Transparency Platform',
+#                 'api_limitations': {
+#                     'max_interval': '1 day',
+#                     'min_interval': '1 Market Time Unit',
+#                     'note': 'Historical data typically more available than real-time'
+#                 },
+#                 'note': 'Data shows actual generation from individual power plants/units'
+#             })
+            
+#             logger.info(f"Successfully retrieved {parsed_data.get('total_points', 0)} data points for {len(units)} generation units")
+#             return parsed_data
+#         else:
+#             # Enhance error message with helpful guidance
+#             error_msg = result.get('error', 'Unknown error')
+#             if 'No matching data found' in error_msg:
+#                 enhanced_error = f"{error_msg}\n\nTip: Try historical dates (e.g., '2023-08-15') as recent data may not be available for detailed generation per unit."
+#                 result['error'] = enhanced_error
+            
+#             logger.error(f"Failed to retrieve actual generation data: {result.get('error')}")
+#             return result
+            
+#     except Exception as e:
+#         logger.error(f"Error getting actual generation for {country_code}: {e}")
+#         return {
+#             'error': f'Failed to retrieve actual generation data: {str(e)}',
+#             'country_code': country_code.upper(),
+#             'status': 'error'
+#         }
+
+@tool
+def get_unavailability_production_units(country_code: str, days_back: int = 7) -> Dict[str, Any]:
+    """
+    Get unavailability information for electricity production units (power plants) in a European country.
+    FIXED: Uses proper ENTSOE API parameters and handles data availability limitations.
+    
+    This function retrieves data about planned and unplanned outages of generation units,
+    including maintenance schedules and forced outages that affect electricity production capacity.
+    Uses ENTSOE document type A77 for unavailability of generation units.
+    
+    Args:
+        country_code: Two-letter country code (e.g., 'BE' for Belgium, 'DE' for Germany)
+        days_back: Number of days of historical unavailability data to retrieve (default: 7, max: 30)
+        
+    Returns:
+        dict: Unavailability data with the following structure:
+            - status: 'success' or 'error'
+            - data_points: List of unavailability events
+            - total_points: Number of unavailability events retrieved
+            - country_code: Country code used
+            - time_range: Start and end times for the data
+            - unavailability_types: Types of unavailabilities found (planned, unplanned, etc.)
+            - affected_units: List of generation units with unavailabilities
+            - error: Error message (if status is 'error')
+            
+    Example:
+        >>> result = get_unavailability_production_units('BE', 7)
+        >>> if result['status'] == 'success':
+        ...     print(f"Found {result['total_points']} unavailability events")
+        ...     print(f"Affected units: {len(result.get('affected_units', []))}")
+    """
+    try:
+        # Validate country code
+        area_code = _get_area_code(country_code)
+        if not area_code:
+            return {
+                'error': f'Unsupported country code: {country_code}. Supported countries: {_get_supported_countries()}',
+                'status': 'error'
+            }
+        
+
+        
+        # Limit days_back to reasonable range (unavailability data has limited availability)
+        days_back = min(days_back, 30)  # Max 30 days
+        
+        # Get country-specific data delay (unavailability data typically has longer delays)
+        data_delay = _get_data_delay(country_code)
+        # Add extra delay for unavailability data (typically published later)
+        data_delay += 24  # Additional 24 hours for unavailability data
+        
+        # Calculate time range with proper delay
+        cet = pytz.timezone('Europe/Berlin')
+        now_cet = datetime.now(cet)
+        
+        # Apply data delay and go back the requested days
+        end_time = now_cet - timedelta(hours=data_delay)
+        start_time = end_time - timedelta(days=days_back)
+        
+        # Round to start/end of day for unavailability data (daily granularity)
+        start_time = start_time.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_time = end_time.replace(hour=23, minute=59, second=0, microsecond=0)
+        
+        logger.info(f"Requesting unavailability data for {country_code} (delay: {data_delay}h) from {start_time.strftime('%Y-%m-%d')} to {end_time.strftime('%Y-%m-%d')}")
+        
+        # Try multiple parameter combinations based on ENTSOE API documentation
+        # The unavailability API (A77) has very specific parameter requirements
+        param= {
+                    'documentType': 'A77',  # Unavailability of generation units
+                    'BiddingZone_Domain': area_code,
+                    'periodStart': start_time.strftime('%Y%m%d%H%M'),
+                    'periodEnd': end_time.strftime('%Y%m%d%H%M')
+                }
+        
+        last_error = None            
+        try:
+            result = _make_entsoe_request(param)
+            
+            if result['status'] == 'success':
+                # Parse the response and extract unavailability information
+                parsed_data = result.copy()
+                
+                # Extract unavailability types and affected units from the data
+                unavailability_types = set()
+                affected_units = set()
+                
+                if 'data_points' in parsed_data:
+                    for point in parsed_data['data_points']:
+                        # Extract unavailability type if available
+                        if 'unavailability_type' in point:
+                            unavailability_types.add(point['unavailability_type'])
+                        elif 'business_type' in point.get('metadata', {}):
+                            unavailability_types.add(point['metadata']['business_type'])
+                        
+                        # Extract affected unit information
+                        if 'unit_name' in point:
+                            affected_units.add(point['unit_name'])
+                        elif 'resource_name' in point:
+                            affected_units.add(point['resource_name'])
+                        elif 'registered_resource' in point.get('metadata', {}):
+                            affected_units.add(point['metadata']['registered_resource'])
+                
+                # Add additional metadata
+                parsed_data.update({
+                    'country_code': country_code.upper(),
+                    'area_code': area_code,
+                    'time_range': {
+                        'start': start_time.strftime('%Y-%m-%d %H:%M'),
+                        'end': end_time.strftime('%Y-%m-%d %H:%M'),
+                        'days_requested': days_back,
+                        'data_delay_hours': data_delay
+                    },
+                    'unavailability_types': list(unavailability_types),
+                    'affected_units': list(affected_units),
+                    'data_type': 'unavailability_production_units',
+                    'document_type': 'A77',
+                    'api_endpoint': 'ENTSOE Transparency Platform',
+                    'note': f'Includes both planned maintenance and unplanned outages. Data delayed by {data_delay} hours.'
+                })
+                
+                logger.info(f"Successfully retrieved {parsed_data.get('total_points', 0)} unavailability events for {len(affected_units)} units ")
+                return parsed_data
+                
+            else:
+                # Log the error but continue trying other methods
+                error_msg = result.get('error', 'Unknown error')
+                logger.info(f"Method failed: {error_msg}")
+                last_error = error_msg
+                
+        except Exception as e:
+            logger.info(f"Method exception: {str(e)}")
+            last_error = str(e)
+    
+        # If we get here, all methods failed
+        return {
+            'error': f'Failed to retrieve unavailability data: {last_error}.',
+            'country_code': country_code.upper(),
+            'area_code': area_code,
+            'status': 'error',
+            'time_range': {
+                'start': start_time.strftime('%Y-%m-%d %H:%M'),
+                'end': end_time.strftime('%Y-%m-%d %H:%M'),
+                'days_requested': days_back,
+                'data_delay_hours': data_delay
+            },
+            'note': 'Unavailability data (A77) has very limited availability and specific requirements.',
+            'suggestions': [
+                f'Try a different country - some TSOs do not provide unavailability data',
+                'Use a shorter time period (1-3 days)',
+                'Try historical dates (several weeks ago)',
+                'Check if the country\'s TSO supports unavailability reporting',
+                'Use alternative data types like generation or load data',
+                'Some countries only provide this data to registered market participants'
+            ],
+            'alternative_functions': [
+                'get_electricity_generation() - for actual generation data',
+                'get_electricity_load() - for consumption data',
+                'get_generation_forecast_day_ahead() - for planned generation'
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting unavailability data for {country_code}: {e}")
+        return {
+            'error': f'Failed to retrieve unavailability data: {str(e)}',
+            'country_code': country_code.upper(),
             'status': 'error'
         }

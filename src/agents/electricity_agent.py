@@ -1,32 +1,36 @@
 import os, sys
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-sys.path.append(project_root)
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+sys.path.insert(0, project_root)
+sys.path.insert(0, os.path.join(project_root, "src"))
 
 from strands import Agent, tool
 from strands.models import BedrockModel
+from strands.models.anthropic import AnthropicModel
 from dotenv import load_dotenv
 import logging
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
-import json
+from typing import Dict, Any, List
+from datetime import datetime
 
 # Add the project root to the path so we can import our modules
-config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../../config/.env')
+config_path = ('./config/.env')
 load_dotenv(config_path)
 
-region = os.environ.get('BEDROCK_REGION', 'us-east-1')        
-# Get model ID from environment variables or use default
-model = os.environ.get('BEDROCK_MODEL', 'us.amazon.nova-pro-v1:0')
+# Try to use Anthropic model if available, fallback to Bedrock
+anthropic_key = os.environ.get('ANTHROPIC_API_KEY')
+anthropic_model = os.environ.get('ANTHROPIC_MODEL', 'claude-3-7-sonnet-20250219')
+print(anthropic_key)
+bedrock_region = os.environ.get('AWS_REGION', 'us-east-1')        
+bedrock_model_id = os.environ.get('BEDROCK_MODEL', 'us.amazon.nova-pro-v1:0')
 
 # Import the ENTSOE tools
 from src.tools.entsoe_tool import (
     get_electricity_load,
     get_electricity_generation,
+    get_generation_forecast_day_ahead,
     get_day_ahead_prices,
     get_cross_border_flows,
     get_renewable_forecast,
     get_supported_countries,
-    debug_entsoe_request,
     get_entsoe_api_info
 )
 
@@ -34,14 +38,41 @@ from src.tools.entsoe_tool import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-bedrock_model = BedrockModel(
-    region_name=region,
-    model_id=model,
-    params={
-        "temperature": 0.7,
-    },
-    cache_prompt="default"
-)
+# Try to initialize model - prefer Anthropic if available
+try:
+    try:
+        ant_model = AnthropicModel(
+            client_args={
+                "api_key": anthropic_key,
+            },
+            model_id=anthropic_model,
+            max_tokens= 4000,
+            params={
+                "temperature": 0.7
+            }
+        )
+        logger.info("Using Anthropic model")
+    except ImportError:
+        logger.warning("AnthropicModel not available, trying Bedrock")
+        model = BedrockModel(
+            region_name=bedrock_region,
+            model_id=bedrock_model_id,
+            params={
+                "temperature": 0.7,
+            }
+        )
+    # Use Bedrock model
+    bed_model = BedrockModel(
+        region_name=bedrock_region,
+        model_id=bedrock_model_id,
+        params={
+            "temperature": 0.7,
+        }
+    )
+    logger.info("Using Bedrock model")
+except Exception as e:
+    logger.error(f"Error initializing model: {e}")
+    model = None
 
 @tool
 def get_country_electricity_overview(country_code: str, hours_back: int = 24) -> Dict[str, Any]:
@@ -566,20 +597,14 @@ def _generate_market_recommendations(country_data: Dict[str, Any]) -> List[str]:
 
 # Create the electricity agent
 electricity_agent = Agent(
-    model=bedrock_model,
+    model=ant_model,
     tools=[
-        get_country_electricity_overview,
-        compare_country_electricity,
-        analyze_cross_border_electricity_flows,
-        get_renewable_energy_forecast,
-        generate_electricity_chart_code,
-        get_electricity_market_insights,
         get_electricity_load,
         get_electricity_generation,
         get_day_ahead_prices,
-        get_cross_border_flows,
+        get_generation_forecast_day_ahead,
+        get_renewable_forecast,
         get_supported_countries,
-        debug_entsoe_request,
         get_entsoe_api_info
     ],
     system_prompt="""
@@ -627,12 +652,28 @@ def ask_electricity_agent(query: str):
         query: User query about electricity markets
         
     Returns:
-        The response from the agent
+        The response from the agent as a string
     """
     try:
+        if not electricity_agent:
+            return "Electricity agent not available. Please check your configuration and ensure API keys are set."
+        
         logger.debug(f"Calling electricity agent for query: {query}")
         response = electricity_agent(query)
-        return response   
+        # Extract message content
+        if hasattr(response, 'message'):
+            if isinstance(response.message, dict) and 'content' in response.message:
+                content = response.message['content']
+                if isinstance(content, list) and len(content) > 0:
+                    message_text = content[0].get('text', str(response.message))
+                else:
+                    message_text = str(content)
+            else:
+                message_text = str(response.message)
+        else:
+            message_text = str(response)
+        return message_text
+            
     except Exception as e:
         logger.error(f"Error in ask_electricity_agent: {str(e)}")
         return f"Error processing request: {str(e)}"

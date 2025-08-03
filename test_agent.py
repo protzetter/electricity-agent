@@ -106,30 +106,6 @@ def main():
     print("🔌 European Electricity Market Analysis Agent - Test Suite")
     print("=" * 60)
     
-    # Check environment
-    print("🔧 Environment Check")
-    print("-" * 20)
-    
-    api_token = os.environ.get('ENTSOE_API_TOKEN')
-    if api_token:
-        print(f"✅ ENTSOE API Token: Found (length: {len(api_token)})")
-    else:
-        print("⚠️  ENTSOE API Token: Not found")
-    
-    anthropic_key = os.environ.get('ANTHROPIC_API_KEY')
-    if anthropic_key:
-        print(f"✅ Anthropic API Key: Found (length: {len(anthropic_key)})")
-    else:
-        print("⚠️  Anthropic API Key: Not found")
-    
-    aws_region = os.environ.get('AWS_REGION')
-    if aws_region:
-        print(f"✅ AWS Region: {aws_region}")
-    else:
-        print("⚠️  AWS Region: Not set")
-    
-    print()
-    
     # Test ENTSOE tools
     tools_ok = test_entsoe_tools()
     
