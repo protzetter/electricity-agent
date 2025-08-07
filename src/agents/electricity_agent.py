@@ -18,7 +18,6 @@ load_dotenv(config_path)
 # Try to use Anthropic model if available, fallback to Bedrock
 anthropic_key = os.environ.get('ANTHROPIC_API_KEY')
 anthropic_model = os.environ.get('ANTHROPIC_MODEL', 'claude-3-7-sonnet-20250219')
-print(anthropic_key)
 bedrock_region = os.environ.get('AWS_REGION', 'us-east-1')        
 bedrock_model_id = os.environ.get('BEDROCK_MODEL', 'us.amazon.nova-pro-v1:0')
 
@@ -38,29 +37,29 @@ from src.tools.entsoe_tool import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Try to initialize model - prefer Anthropic if available
+# # Try to initialize model - prefer Anthropic if available
 try:
-    try:
-        ant_model = AnthropicModel(
-            client_args={
-                "api_key": anthropic_key,
-            },
-            model_id=anthropic_model,
-            max_tokens= 4000,
-            params={
-                "temperature": 0.7
-            }
-        )
-        logger.info("Using Anthropic model")
-    except ImportError:
-        logger.warning("AnthropicModel not available, trying Bedrock")
-        model = BedrockModel(
-            region_name=bedrock_region,
-            model_id=bedrock_model_id,
-            params={
-                "temperature": 0.7,
-            }
-        )
+#     try:
+#         ant_model = AnthropicModel(
+#             client_args={
+#                 "api_key": anthropic_key,
+#             },
+#             model_id=anthropic_model,
+#             max_tokens= 4000,
+#             params={
+#                 "temperature": 0.7
+#             }
+#         )
+#         logger.info("Using Anthropic model")
+#     except ImportError:
+#         logger.warning("AnthropicModel not available, trying Bedrock")
+#         model = BedrockModel(
+#             region_name=bedrock_region,
+#             model_id=bedrock_model_id,
+#             params={
+#                 "temperature": 0.7,
+#             }
+#         )
     # Use Bedrock model
     bed_model = BedrockModel(
         region_name=bedrock_region,
@@ -597,13 +596,14 @@ def _generate_market_recommendations(country_data: Dict[str, Any]) -> List[str]:
 
 # Create the electricity agent
 electricity_agent = Agent(
-    model=ant_model,
+    model=bed_model,
     tools=[
         get_electricity_load,
         get_electricity_generation,
         get_day_ahead_prices,
         get_generation_forecast_day_ahead,
         get_renewable_forecast,
+        get_cross_border_flows,
         get_supported_countries,
         get_entsoe_api_info
     ],

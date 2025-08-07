@@ -184,3 +184,4 @@ site/
 *key*
 *token*
 !requirements*.txt
+.kiro/hooks/docs-sync-hook.kiro.hook
