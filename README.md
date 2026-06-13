@@ -58,7 +58,7 @@ uv run python src/agents/electricity_agent.py
 
 ### MCP Server
 
-The electricity tools are exposed as an [MCP](https://modelcontextprotocol.io) server, letting any MCP-compatible client (Claude Desktop, other agents) call them directly.
+The agent is exposed as an [MCP](https://modelcontextprotocol.io) server with a single tool. MCP clients send natural language queries and the strands agent handles all ENTSOE data fetching internally.
 
 **Run the server:**
 ```bash
@@ -69,36 +69,22 @@ uv run python mcp_server.py
 ```json
 {
   "mcpServers": {
-    "electricity-market": {
+    "electricity-market-agent": {
       "command": "uv",
-      "args": ["run", "python", "mcp_server.py"],
-      "cwd": "/path/to/electricity-agent"
+      "args": ["--directory", "/path/to/electricity-agent", "run", "python", "mcp_server.py"]
     }
   }
 }
 ```
 
-**Use from a strands agent:**
-```python
-from strands import Agent
-from strands.tools.mcp import MCPClient
-from mcp.client.stdio import stdio_client, StdioServerParameters
+**Available MCP tool:**
+- `ask_electricity_agent_tool(query)` — send any natural language question about European electricity markets; the agent decides which data to fetch
 
-params = StdioServerParameters(command="uv", args=["run", "python", "mcp_server.py"])
-with MCPClient(lambda: stdio_client(params)) as client:
-    agent = Agent(tools=client.list_tools_sync().items)
-    print(agent("What are the day-ahead prices for Germany?"))
-```
-
-**Available MCP tools:**
-- `get_electricity_load` — consumption data in MW
-- `get_electricity_generation` — generation by production type
-- `get_day_ahead_prices` — prices in EUR/MWh
-- `get_generation_forecast_day_ahead` — day-ahead generation forecast
-- `get_renewable_forecast` — wind and solar forecast
-- `get_cross_border_flows` — physical flows between two countries
-- `get_supported_countries` — list of supported country codes
-- `get_entsoe_api_info` — API capabilities and requirements
+**Example queries:**
+- `"What is the current electricity load in Germany?"`
+- `"Compare day-ahead prices between France and Italy"`
+- `"Show me the renewable forecast for Spain"`
+- `"What are cross-border flows from Germany to France?"`
 
 ### Direct Tool Usage
 
