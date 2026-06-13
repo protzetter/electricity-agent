@@ -38,7 +38,7 @@ logger.setLevel(logging.INFO)
 
 # CORRECTED Area codes for European countries (FIXED CRITICAL BUGS)
 def _get_area_code(country_code: str) -> str:
-    """Internal function to get ENTSOE area code from country code."""
+    """Internal function to get ENTSOE control area code from country code."""
     area_codes = {
         'DE': '10Y1001A1001A83F', 'FR': '10YFR-RTE------C', 'IT': '10YIT-GRTN-----B',
         'ES': '10YES-REE------0', 'NL': '10YNL----------L', 'BE': '10YBE----------2',
@@ -48,6 +48,22 @@ def _get_area_code(country_code: str) -> str:
         'IE': '10YIE-1001A00010', 'PT': '10YPT-REN------W'
     }
     return area_codes.get(country_code.upper())
+
+def _get_price_area_code(country_code: str) -> str:
+    """Get the bidding zone code for day-ahead prices (differs from control area for some countries)."""
+    price_zones = {
+        # DE uses DE-LU bidding zone, not the control area
+        'DE': '10Y1001A1001A82H',
+        # IT: use North zone as most representative single zone
+        'IT': '10Y1001A1001A73I',
+        # NO: use NO1 (Oslo/South-East) as main zone
+        'NO': '10YNO-1--------2',
+        # DK: use DK1 (West Denmark) as main zone
+        'DK': '10YDK-1--------W',
+        # SE: use SE3 (Stockholm/Central) as most representative zone
+        'SE': '10Y1001A1001A46L',
+    }
+    return price_zones.get(country_code.upper()) or _get_area_code(country_code)
 
 def _get_data_delay(country_code: str) -> int:
     """Internal function to get data delay for country."""
@@ -677,54 +693,26 @@ def get_day_ahead_prices(country_code: str, days_back: int = 1) -> Dict[str, Any
         dict: Day-ahead electricity prices with timestamps and values in EUR/MWh
     """
     try:
-        # Validate country code
-        area_code = _get_area_code(country_code)
+        # Use bidding zone code for prices (differs from control area for DE, IT, NO, DK)
+        area_code = _get_price_area_code(country_code)
         if not area_code:
             return {
                 'error': f'Unsupported country code: {country_code}',
                 'supported_countries': _get_supported_countries(),
                 'status': 'error'
             }
-        
 
-        
-        # Day-ahead prices have different delays by country
-        price_config = {
-            'DE': {'delay': 24},  # Germany
-            'FR': {'delay': 24},  # France
-            'IT': {'delay': 12},  # Italy
-            'ES': {'delay': 24},  # Spain
-            'NL': {'delay': 24},  # Netherlands
-            'BE': {'delay': 24},  # Belgium
-            'AT': {'delay': 24},  # Austria
-            'CH': {'delay': 24},  # Switzerland
-            'PL': {'delay': 24},  # Poland
-            'CZ': {'delay': 24},  # Czech Republic
-            'DK': {'delay': 24},  # Denmark
-            'SE': {'delay': 24},  # Sweden
-            'NO': {'delay': 24},  # Norway
-            'FI': {'delay': 24},  # Finland
-            'GB': {'delay': 24},  # Great Britain
-            'IE': {'delay': 24},  # Ireland
-            'PT': {'delay': 24}   # Portugal
-        }
-        
-        config = price_config.get(country_code.upper(), {'delay': 24})
-        data_delay = config['delay']
-        
-        # Calculate time range for day-ahead prices
+        # Day-ahead prices are published ~12:30 CET for the next day — no artificial delay needed.
+        # days_back=1 → today, days_back=2 → yesterday, etc.
         cet = pytz.timezone('Europe/Berlin')
         now_cet = datetime.now(cet)
-        
-        # Apply delay and calculate target date
-        reference_time = now_cet - timedelta(hours=data_delay)
-        target_date = reference_time.date() - timedelta(days=days_back - 1)
-        
-        # Day-ahead prices are for complete days (00:00 to 24:00)
+        target_date = now_cet.date() - timedelta(days=days_back - 1)
+
+        # Day-ahead prices cover complete days (00:00 to 24:00)
         start_time = cet.localize(datetime.combine(target_date, datetime.min.time()))
         end_time = start_time + timedelta(days=1)
-        
-        logger.info(f"Fetching day-ahead prices for {country_code} (delay: {data_delay}h) for date: {target_date.strftime('%Y-%m-%d')}")
+
+        logger.info(f"Fetching day-ahead prices for {country_code} (zone: {area_code}) for date: {target_date.strftime('%Y-%m-%d')}")
 
         params = {
                 'documentType': 'A44',  # Day-ahead prices
@@ -746,19 +734,18 @@ def get_day_ahead_prices(country_code: str, days_back: int = 1) -> Dict[str, Any
             
             result.update({
                 'country_code': country_code.upper(),
-                'area_code': area_code,
+                'price_zone': area_code,
                 'data_type': 'day_ahead_prices',
                 'time_range': {
                     'start': start_time.strftime('%Y-%m-%d %H:%M'),
                     'end': end_time.strftime('%Y-%m-%d %H:%M'),
                     'target_date': target_date.strftime('%Y-%m-%d'),
                     'days_requested': days_back,
-                    'data_delay_hours': data_delay
                 },
                 'document_type': 'A44',
                 'currency': 'EUR',
                 'unit': 'EUR/MWh',
-                'note': f'Day-ahead prices for {target_date.strftime("%Y-%m-%d")}. Data delayed by {data_delay} hours.'
+                'note': f'Day-ahead prices for {target_date.strftime("%Y-%m-%d")}.',
             })
         
         return result
