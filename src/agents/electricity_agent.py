@@ -18,8 +18,8 @@ load_dotenv(config_path)
 # Try to use Anthropic model if available, fallback to Bedrock
 anthropic_key = os.environ.get('ANTHROPIC_API_KEY')
 anthropic_model = os.environ.get('ANTHROPIC_MODEL', 'claude-3-7-sonnet-20250219')
-bedrock_region = os.environ.get('AWS_REGION', 'us-east-1')        
-bedrock_model_id = os.environ.get('BEDROCK_MODEL', 'us.amazon.nova-pro-v1:0')
+bedrock_region = os.environ.get('AWS_REGION', 'eu-west-1')
+bedrock_model_id = os.environ.get('BEDROCK_MODEL', 'qwen.qwen3-32b-v1:0')
 
 # Import the ENTSOE tools
 from src.tools.entsoe_tool import (
@@ -37,41 +37,16 @@ from src.tools.entsoe_tool import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# # Try to initialize model - prefer Anthropic if available
 try:
-#     try:
-#         ant_model = AnthropicModel(
-#             client_args={
-#                 "api_key": anthropic_key,
-#             },
-#             model_id=anthropic_model,
-#             max_tokens= 4000,
-#             params={
-#                 "temperature": 0.7
-#             }
-#         )
-#         logger.info("Using Anthropic model")
-#     except ImportError:
-#         logger.warning("AnthropicModel not available, trying Bedrock")
-#         model = BedrockModel(
-#             region_name=bedrock_region,
-#             model_id=bedrock_model_id,
-#             params={
-#                 "temperature": 0.7,
-#             }
-#         )
-    # Use Bedrock model
     bed_model = BedrockModel(
         region_name=bedrock_region,
         model_id=bedrock_model_id,
-        params={
-            "temperature": 0.7,
-        }
+        temperature=0.7,
     )
     logger.info("Using Bedrock model")
 except Exception as e:
     logger.error(f"Error initializing model: {e}")
-    model = None
+    bed_model = None
 
 @tool
 def get_country_electricity_overview(country_code: str, hours_back: int = 24) -> Dict[str, Any]:
@@ -596,7 +571,7 @@ def _generate_market_recommendations(country_data: Dict[str, Any]) -> List[str]:
 
 # Create the electricity agent
 electricity_agent = Agent(
-    model=bed_model,
+    model=bed_model if bed_model else BedrockModel(),
     tools=[
         get_electricity_load,
         get_electricity_generation,
@@ -660,19 +635,7 @@ def ask_electricity_agent(query: str):
         
         logger.debug(f"Calling electricity agent for query: {query}")
         response = electricity_agent(query)
-        # Extract message content
-        if hasattr(response, 'message'):
-            if isinstance(response.message, dict) and 'content' in response.message:
-                content = response.message['content']
-                if isinstance(content, list) and len(content) > 0:
-                    message_text = content[0].get('text', str(response.message))
-                else:
-                    message_text = str(content)
-            else:
-                message_text = str(response.message)
-        else:
-            message_text = str(response)
-        return message_text
+        return str(response)
             
     except Exception as e:
         logger.error(f"Error in ask_electricity_agent: {str(e)}")
