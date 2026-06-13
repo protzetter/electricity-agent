@@ -11,7 +11,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 # Add the src directory to the path
-sys.path.append('/Users/patrickrotzetter/Library/CloudStorage/OneDrive-Personal/Documents/dev/electricity-agent/src/tools')
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src/tools'))
 # Add the project root to the path so we can import our modules
 config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config/.env')
 load_dotenv(config_path)
@@ -81,7 +81,6 @@ def test_day_ahead_prices(country_code):
         if result['status'] == 'success':
             print(f"✅ SUCCESS: {result['total_points']} data points")
             print(f"📅 Target date: {result['time_range']['target_date']}")
-            print(f"🕐 Data delay: {result['time_range']['data_delay_hours']} hours")
             print(f"💱 Currency: {result.get('currency', 'EUR')}")
             
             if result['data_points']:
