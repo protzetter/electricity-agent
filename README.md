@@ -22,22 +22,15 @@ A specialized AI agent for analyzing European electricity markets using real-tim
 ## Installation
 
 1. Clone this repository
-2. Install dependencies (recommended with UV):
+2. Install dependencies with [uv](https://docs.astral.sh/uv/):
    ```bash
-   # Using UV (recommended - faster and more reliable)
-   uv venv
-   source .venv/bin/activate  # On macOS/Linux
-   uv pip install -r requirements.txt
-   
-   # Or using regular pip
-   pip install -r requirements.txt
+   uv sync
    ```
 3. Set up your environment variables in `config/.env`:
    ```
    ENTSOE_API_TOKEN=your_entsoe_api_token_here
-   ANTHROPIC_API_KEY=your_anthropic_key_here
-   AWS_REGION=us-east-1
-   BEDROCK_MODEL=us.amazon.nova-pro-v1:0
+   AWS_REGION=eu-west-1
+   BEDROCK_MODEL=qwen.qwen3-32b-v1:0
    ```
 
 ## Getting ENTSOE API Token
@@ -48,29 +41,64 @@ A specialized AI agent for analyzing European electricity markets using real-tim
 
 ## Usage
 
-### Basic Usage
+### Python API
 
 ```python
 from src.agents.electricity_agent import ask_electricity_agent
 
-# Get electricity overview for Germany
 response = ask_electricity_agent("What's the current electricity situation in Germany?")
 print(response)
-
-# Compare multiple countries
-response = ask_electricity_agent("Compare electricity prices between Germany, France, and Italy")
-print(response)
-
-# Analyze renewable energy
-response = ask_electricity_agent("What's the renewable energy forecast for Spain?")
-print(response)
 ```
 
-### Interactive Mode
+### Interactive CLI
 
 ```bash
-python src/agents/electricity_agent.py
+uv run python src/agents/electricity_agent.py
 ```
+
+### MCP Server
+
+The electricity tools are exposed as an [MCP](https://modelcontextprotocol.io) server, letting any MCP-compatible client (Claude Desktop, other agents) call them directly.
+
+**Run the server:**
+```bash
+uv run python mcp_server.py
+```
+
+**Claude Desktop config** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "electricity-market": {
+      "command": "uv",
+      "args": ["run", "python", "mcp_server.py"],
+      "cwd": "/path/to/electricity-agent"
+    }
+  }
+}
+```
+
+**Use from a strands agent:**
+```python
+from strands import Agent
+from strands.tools.mcp import MCPClient
+from mcp.client.stdio import stdio_client, StdioServerParameters
+
+params = StdioServerParameters(command="uv", args=["run", "python", "mcp_server.py"])
+with MCPClient(lambda: stdio_client(params)) as client:
+    agent = Agent(tools=client.list_tools_sync().items)
+    print(agent("What are the day-ahead prices for Germany?"))
+```
+
+**Available MCP tools:**
+- `get_electricity_load` — consumption data in MW
+- `get_electricity_generation` — generation by production type
+- `get_day_ahead_prices` — prices in EUR/MWh
+- `get_generation_forecast_day_ahead` — day-ahead generation forecast
+- `get_renewable_forecast` — wind and solar forecast
+- `get_cross_border_flows` — physical flows between two countries
+- `get_supported_countries` — list of supported country codes
+- `get_entsoe_api_info` — API capabilities and requirements
 
 ### Direct Tool Usage
 
@@ -186,8 +214,8 @@ The system includes comprehensive error handling for:
 - **Verify**: Test your token at the [ENTSOE Transparency Platform](https://transparency.entsoe.eu/)
 
 #### Installation Problems
-- **Recommended**: Use UV package manager: `uv pip install -r requirements.txt`
-- **Fallback**: Use regular pip: `pip install -r requirements.txt`
+- **Recommended**: Use uv: `uv sync`
+- **Fallback**: `pip install -r requirements.txt`
 
 ## Contributing
 
@@ -233,30 +261,26 @@ The `get_unavailability_production_units()` function has been improved but has i
 - **Alternative Recommendations**: Use `get_electricity_generation()`, `get_generation_forecast_day_ahead()`, or `get_renewable_forecast()` instead
 
 ### Installation Improvements
-- **UV Package Manager**: Now supports UV for faster dependency management
+- **uv**: Project now managed with `uv sync` via `pyproject.toml`
 - **Better Error Messages**: More informative error handling throughout
 - **Enhanced Documentation**: Clear warnings about data availability limitations
 
 ## Changelog
 
-### v1.2.1 (Latest)
+### v2.0.0 (Latest)
+- ✅ **Added**: MCP server exposing all ENTSOE tools (`mcp_server.py`)
+- ✅ **Updated**: strands-agents to 1.x (`BedrockModel` API, simplified response handling)
+- ✅ **Switched**: Default model to `qwen.qwen3-32b-v1:0` on `eu-west-1`
+- ✅ **Added**: `pyproject.toml` for uv-based dependency management
+
+### v1.2.1
 - ✅ **Fixed**: Germany area code corrected from `'10Y1001A1001A82H'` to `'10Y1001A1001A83F'`
-- ✅ **Improved**: All German electricity market functions now work correctly
-- 📚 **Updated**: Documentation reflects the Germany area code fix
 
 ### v1.2.0
 - ✅ **Fixed**: Cross-border flows function now works reliably with all major European interconnections
 - ⚠️ **Updated**: Unavailability function with clear data availability warnings
-- 🔧 **Improved**: Better error handling and user guidance
-- 📚 **Enhanced**: Documentation with realistic expectations for data availability
-
-### v1.1.0
-- Added comprehensive error handling for API issues
-- Improved timezone handling across all functions
-- Enhanced data parsing for better reliability
 
 ### v1.0.0
 - Initial release with full ENTSOE integration
 - Support for 17 European countries
 - Comprehensive electricity market analysis
-- Real-time data access and forecasting
