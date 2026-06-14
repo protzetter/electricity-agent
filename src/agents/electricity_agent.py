@@ -16,8 +16,6 @@ config_path = ('./config/.env')
 load_dotenv(config_path)
 
 # Try to use Anthropic model if available, fallback to Bedrock
-anthropic_key = os.environ.get('ANTHROPIC_API_KEY')
-anthropic_model = os.environ.get('ANTHROPIC_MODEL', 'claude-3-7-sonnet-20250219')
 bedrock_region = os.environ.get('AWS_REGION', 'eu-west-1')
 bedrock_model_id = os.environ.get('BEDROCK_MODEL', 'qwen.qwen3-32b-v1:0')
 
